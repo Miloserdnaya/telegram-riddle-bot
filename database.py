@@ -32,9 +32,20 @@ async def init_db():
                 total_riddles_attempted INTEGER DEFAULT 0,
                 total_hints_used INTEGER DEFAULT 0,
                 rating INTEGER DEFAULT 1000,
-                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_course_recommendation_date DATE
             )
         """)
+        
+        # Миграция: добавляем поле last_course_recommendation_date если его нет
+        try:
+            await db.execute("""
+                ALTER TABLE users ADD COLUMN last_course_recommendation_date DATE
+            """)
+            await db.commit()
+        except Exception:
+            # Поле уже существует, игнорируем ошибку
+            pass
         
         # Таблица попыток ответов
         await db.execute("""
@@ -429,6 +440,42 @@ async def get_leaderboard(limit: int = 10) -> List[Dict]:
             }
             for row in results
         ]
+
+
+async def should_send_course_recommendation(user_id: int) -> bool:
+    """Проверить, нужно ли отправить рекомендацию курса (только раз в день)"""
+    from datetime import date
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT last_course_recommendation_date FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        result = await cursor.fetchone()
+        
+        if not result or not result[0]:
+            # Никогда не отправляли рекомендацию
+            return True
+        
+        last_date_str = result[0]
+        try:
+            last_date = datetime.strptime(last_date_str, "%Y-%m-%d").date() if isinstance(last_date_str, str) else last_date_str
+            today = date.today()
+            return last_date < today
+        except:
+            # Если ошибка парсинга, отправляем
+            return True
+
+
+async def mark_course_recommendation_sent(user_id: int):
+    """Отметить, что рекомендация курса была отправлена сегодня"""
+    from datetime import date
+    async with aiosqlite.connect(DB_PATH) as db:
+        today = date.today().isoformat()
+        await db.execute(
+            "UPDATE users SET last_course_recommendation_date = ? WHERE user_id = ?",
+            (today, user_id)
+        )
+        await db.commit()
 
 
 async def get_user_stats(user_id: int) -> Optional[Dict]:

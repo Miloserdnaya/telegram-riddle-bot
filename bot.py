@@ -552,6 +552,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(message, parse_mode='HTML')
         
         # Рекомендация курса: если 3 попытки использованы ИЛИ использовано 5-10 подсказок
+        # НО только один раз в день!
         should_recommend_course = False
         if attempt_number == 3:  # Использовано 3 попытки
             should_recommend_course = True
@@ -559,20 +560,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             should_recommend_course = True
         
         if should_recommend_course and current_riddle:
-            try:
-                # Определяем курс по теме загадки
-                course = course_recommendations.get_course_by_riddle_theme(
-                    current_riddle["question"],
-                    current_riddle["answer"]
-                )
-                course_message = course_recommendations.format_course_recommendation(course)
-                
-                # Небольшая задержка перед рекомендацией
-                await asyncio.sleep(1)
-                await update.message.reply_text(course_message, parse_mode='HTML', disable_web_page_preview=False)
-                logger.info(f"Рекомендация курса отправлена пользователю {user.id}")
-            except Exception as e:
-                logger.error(f"Ошибка при отправке рекомендации курса: {e}", exc_info=True)
+            # Проверяем, отправляли ли уже рекомендацию сегодня
+            can_send = await database.should_send_course_recommendation(user.id)
+            
+            if can_send:
+                try:
+                    # Определяем курс по теме загадки
+                    course = course_recommendations.get_course_by_riddle_theme(
+                        current_riddle["question"],
+                        current_riddle["answer"]
+                    )
+                    course_message = course_recommendations.format_course_recommendation(course)
+                    
+                    # Небольшая задержка перед рекомендацией
+                    await asyncio.sleep(1)
+                    await update.message.reply_text(course_message, parse_mode='HTML', disable_web_page_preview=False)
+                    
+                    # Отмечаем, что рекомендация отправлена сегодня
+                    await database.mark_course_recommendation_sent(user.id)
+                    logger.info(f"Рекомендация курса отправлена пользователю {user.id}")
+                except Exception as e:
+                    logger.error(f"Ошибка при отправке рекомендации курса: {e}", exc_info=True)
+            else:
+                logger.info(f"Рекомендация курса уже была отправлена пользователю {user.id} сегодня, пропускаем")
         
         # Если после подсказки было 3 ошибки - отправляем новую загадку
         if hints_given > 0 and wrong_attempts_after_hint >= 3:
