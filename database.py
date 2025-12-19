@@ -129,10 +129,54 @@ async def get_riddle_by_id(riddle_id: int) -> Optional[Dict]:
         return None
 
 
-async def get_unsolved_riddle_for_user(user_id: int) -> Optional[Dict]:
-    """Получить нерешенную загадку для пользователя"""
+async def get_riddle_by_question(question: str) -> Optional[Dict]:
+    """Получить загадку по вопросу"""
     async with aiosqlite.connect(DB_PATH) as db:
-        # Получаем все загадки, которые пользователь еще не решил
+        cursor = await db.execute(
+            "SELECT id, question, answer, hint FROM riddles WHERE question = ?",
+            (question,)
+        )
+        result = await cursor.fetchone()
+        if result:
+            return {
+                "id": result[0],
+                "question": result[1],
+                "answer": result[2],
+                "hint": result[3]
+            }
+        return None
+
+
+async def user_has_seen_riddle(user_id: int, question: str) -> bool:
+    """Проверить, видел ли пользователь эту загадку (решил или пытался решить)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Проверяем, есть ли попытки пользователя для загадки с таким вопросом
+        cursor = await db.execute(
+            """SELECT COUNT(*) FROM attempts a
+               JOIN riddles r ON a.riddle_id = r.id
+               WHERE a.user_id = ? AND r.question = ?""",
+            (user_id, question)
+        )
+        result = await cursor.fetchone()
+        has_attempts = result[0] > 0 if result else False
+        
+        # Проверяем, есть ли активная загадка с таким вопросом
+        cursor = await db.execute(
+            """SELECT COUNT(*) FROM user_active_riddles uar
+               JOIN riddles r ON uar.riddle_id = r.id
+               WHERE uar.user_id = ? AND r.question = ?""",
+            (user_id, question)
+        )
+        result = await cursor.fetchone()
+        has_active = result[0] > 0 if result else False
+        
+        return has_attempts or has_active
+
+
+async def get_unsolved_riddle_for_user(user_id: int) -> Optional[Dict]:
+    """Получить нерешенную загадку для пользователя (которую пользователь еще не видел)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Получаем загадки, которые пользователь еще не видел (не решал и не пытался решить)
         cursor = await db.execute(
             """SELECT r.id, r.question, r.answer, r.hint
                FROM riddles r
@@ -140,11 +184,16 @@ async def get_unsolved_riddle_for_user(user_id: int) -> Optional[Dict]:
                AND r.id NOT IN (
                    SELECT DISTINCT riddle_id 
                    FROM attempts 
-                   WHERE user_id = ? AND is_correct = 1
+                   WHERE user_id = ?
+               )
+               AND r.id NOT IN (
+                   SELECT DISTINCT riddle_id
+                   FROM user_active_riddles
+                   WHERE user_id = ?
                )
                ORDER BY r.created_at DESC
                LIMIT 1""",
-            (user_id,)
+            (user_id, user_id)
         )
         result = await cursor.fetchone()
         if result:

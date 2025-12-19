@@ -190,31 +190,102 @@ async def send_riddle_to_user(user_id: int, bot, active_riddle=None, is_new=True
     """Отправить загадку конкретному пользователю"""
     try:
         if not active_riddle:
-            # Пытаемся найти нерешенную загадку для пользователя
-            logger.info(f"Поиск нерешенной загадки для пользователя {user_id}")
-            active_riddle = await database.get_unsolved_riddle_for_user(user_id)
-            
-            # Если нерешенных загадок нет, создаем новую
-            if not active_riddle:
-                logger.info(f"Нет нерешенных загадок, создаем новую для пользователя {user_id}")
-                riddle = riddle_generator.get_random_riddle()
-                riddle_id = await database.add_riddle(
-                    question=riddle["question"],
-                    answer=riddle["answer"],
-                    hint=riddle.get("hint")
-                )
-                if not riddle_id:
-                    raise Exception("Не удалось создать загадку в базе данных")
+            if is_new:
+                # Если is_new=True, ВСЕГДА создаем новую загадку
+                logger.info(f"[НОВАЯ ЗАГАДКА] Генерация новой загадки для пользователя {user_id}")
                 
-                active_riddle = {
-                    "id": riddle_id,
-                    "question": riddle["question"],
-                    "answer": riddle["answer"],
-                    "hint": riddle.get("hint")
-                }
-                logger.info(f"Создана новая загадка #{riddle_id} для пользователя {user_id}")
+                # Генерируем новую загадку, проверяя что она уникальна для пользователя
+                max_attempts = 10  # Максимум попыток найти уникальную загадку
+                riddle = None
+                riddle_id = None
+                
+                for attempt in range(max_attempts):
+                    # Получаем случайную загадку
+                    riddle = riddle_generator.get_random_riddle()
+                    
+                    # Проверяем, не видел ли пользователь эту загадку
+                    user_saw_this = await database.user_has_seen_riddle(user_id, riddle["question"])
+                    
+                    if not user_saw_this:
+                        # Проверяем, не добавлена ли уже эта загадка в базу
+                        existing_riddle = await database.get_riddle_by_question(riddle["question"])
+                        
+                        if existing_riddle:
+                            # Загадка уже в базе, используем её если пользователь её не видел
+                            riddle_id = existing_riddle["id"]
+                            active_riddle = {
+                                "id": riddle_id,
+                                "question": existing_riddle["question"],
+                                "answer": existing_riddle["answer"],
+                                "hint": existing_riddle.get("hint")
+                            }
+                            logger.info(f"Используем существующую загадку #{riddle_id} для пользователя {user_id}")
+                            break
+                        else:
+                            # Загадки нет в базе, добавляем новую
+                            riddle_id = await database.add_riddle(
+                                question=riddle["question"],
+                                answer=riddle["answer"],
+                                hint=riddle.get("hint")
+                            )
+                            if not riddle_id:
+                                raise Exception("Не удалось создать загадку в базе данных")
+                            
+                            active_riddle = {
+                                "id": riddle_id,
+                                "question": riddle["question"],
+                                "answer": riddle["answer"],
+                                "hint": riddle.get("hint")
+                            }
+                            logger.info(f"Создана новая загадка #{riddle_id} для пользователя {user_id}")
+                            break
+                    else:
+                        logger.info(f"Попытка {attempt + 1}: пользователь {user_id} уже видел эту загадку, пробуем другую")
+                
+                if not active_riddle:
+                    # Если не удалось найти уникальную загадку, создаем любую новую
+                    logger.warning(f"Не удалось найти уникальную загадку для {user_id}, создаем любую новую")
+                    riddle = riddle_generator.get_random_riddle()
+                    riddle_id = await database.add_riddle(
+                        question=riddle["question"],
+                        answer=riddle["answer"],
+                        hint=riddle.get("hint")
+                    )
+                    if not riddle_id:
+                        raise Exception("Не удалось создать загадку в базе данных")
+                    
+                    active_riddle = {
+                        "id": riddle_id,
+                        "question": riddle["question"],
+                        "answer": riddle["answer"],
+                        "hint": riddle.get("hint")
+                    }
             else:
-                logger.info(f"Найдена нерешенная загадка #{active_riddle['id']} для пользователя {user_id}")
+                # Если is_new=False, пытаемся найти нерешенную загадку
+                logger.info(f"Поиск нерешенной загадки для пользователя {user_id}")
+                active_riddle = await database.get_unsolved_riddle_for_user(user_id)
+                
+                # Если нерешенных загадок нет, создаем новую
+                if not active_riddle:
+                    logger.info(f"Нет нерешенных загадок, создаем новую для пользователя {user_id}")
+                    riddle = riddle_generator.get_random_riddle()
+                    riddle_id = await database.add_riddle(
+                        question=riddle["question"],
+                        answer=riddle["answer"],
+                        hint=riddle.get("hint")
+                    )
+                    if not riddle_id:
+                        raise Exception("Не удалось создать загадку в базе данных")
+                    
+                    active_riddle = {
+                        "id": riddle_id,
+                        "question": riddle["question"],
+                        "answer": riddle["answer"],
+                        "hint": riddle.get("hint")
+                    }
+                    logger.info(f"Создана новая загадка #{riddle_id} для пользователя {user_id}")
+                else:
+                    logger.info(f"Найдена нерешенная загадка #{active_riddle['id']} для пользователя {user_id}")
         
         # Установить активную загадку для пользователя
         await database.set_user_active_riddle(user_id, active_riddle['id'])
@@ -420,31 +491,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Отправляем сообщение о правильном ответе
         await update.message.reply_text(message, parse_mode='HTML')
         
-        # СРАЗУ отправляем НОВУЮ загадку (всегда генерируем новую, не ищем из существующих)
+        # СРАЗУ отправляем НОВУЮ загадку (всегда генерируем новую уникальную)
         try:
-            logger.info(f"[ПРАВИЛЬНЫЙ ОТВЕТ] Генерация и отправка новой загадки пользователю {user.id}")
+            logger.info(f"[ПРАВИЛЬНЫЙ ОТВЕТ] Генерация и отправка новой уникальной загадки пользователю {user.id}")
             
-            # Всегда генерируем новую загадку после правильного ответа
-            riddle = riddle_generator.get_random_riddle()
-            riddle_id = await database.add_riddle(
-                question=riddle["question"],
-                answer=riddle["answer"],
-                hint=riddle.get("hint")
-            )
-            
-            if not riddle_id:
-                raise Exception("Не удалось создать новую загадку в базе данных")
-            
-            new_riddle = {
-                "id": riddle_id,
-                "question": riddle["question"],
-                "answer": riddle["answer"],
-                "hint": riddle.get("hint")
-            }
-            
-            # Отправляем новую загадку
-            await send_riddle_to_user(user.id, context.bot, active_riddle=new_riddle, is_new=True)
-            logger.info(f"[УСПЕХ] Новая загадка #{riddle_id} отправлена пользователю {user.id}")
+            # Используем send_riddle_to_user с is_new=True - она сама найдет уникальную загадку
+            await send_riddle_to_user(user.id, context.bot, active_riddle=None, is_new=True)
+            logger.info(f"[УСПЕХ] Новая уникальная загадка отправлена пользователю {user.id}")
         except Exception as e:
             logger.error(f"[ОШИБКА] Не удалось отправить новую загадку пользователю {user.id}: {e}", exc_info=True)
             try:
@@ -534,9 +587,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(0.5)
             
             try:
-                logger.info(f"[3 ОШИБКИ ПОСЛЕ ПОДСКАЗКИ] Отправка новой загадки пользователю {user.id}")
+                logger.info(f"[3 ОШИБКИ ПОСЛЕ ПОДСКАЗКИ] Отправка новой уникальной загадки пользователю {user.id}")
                 await send_riddle_to_user(user.id, context.bot, active_riddle=None, is_new=True)
-                logger.info(f"[УСПЕХ] Новая загадка отправлена пользователю {user.id}")
+                logger.info(f"[УСПЕХ] Новая уникальная загадка отправлена пользователю {user.id}")
             except Exception as e:
                 logger.error(f"[ОШИБКА] Не удалось отправить новую загадку пользователю {user.id}: {e}", exc_info=True)
                 try:
