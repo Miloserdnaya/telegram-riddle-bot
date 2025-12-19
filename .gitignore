@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+*.db
+*.sqlite
+venv/
+.venv/
+credentials.json
+credentials_template.json
+bot.log
+bot.error.log
+
