@@ -475,6 +475,9 @@ async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик callback запросов от inline кнопок"""
     query = update.callback_query
+    if not query:
+        return
+    
     await query.answer()
     
     user_id = query.from_user.id
@@ -487,40 +490,67 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         first_name=query.from_user.first_name
     )
     
-    if data.startswith("hint_"):
-        # Создаем временный update для hint
-        class FakeMessage:
-            def __init__(self, user):
-                self.from_user = user
-        fake_update = Update(update_id=update.update_id, callback_query=query)
-        fake_update.message = FakeMessage(query.from_user)
-        await hint(fake_update, context)
-        
-    elif data.startswith("stats_"):
-        # Создаем временный update для stats
-        class FakeMessage:
-            def __init__(self, user):
-                self.from_user = user
-        fake_update = Update(update_id=update.update_id, callback_query=query)
-        fake_update.message = FakeMessage(query.from_user)
-        await stats(fake_update, context)
-        
-    elif data.startswith("leaderboard_"):
-        # Создаем временный update для leaderboard
-        class FakeMessage:
-            def __init__(self, user):
-                self.from_user = user
-        fake_update = Update(update_id=update.update_id, callback_query=query)
-        fake_update.message = FakeMessage(query.from_user)
-        await leaderboard(fake_update, context)
-        
-    elif data.startswith("new_riddle_"):
-        # Отправляем новую загадку
-        try:
+    try:
+        if data.startswith("hint_"):
+            hint_text = await database.get_hint(user_id)
+            if not hint_text:
+                riddle_info = await database.get_user_active_riddle_info(user_id)
+                if not riddle_info:
+                    message = "У вас нет активной загадки. Используйте /riddle чтобы получить загадку"
+                else:
+                    wrong_attempts = riddle_info["wrong_attempts"]
+                    hints_given = riddle_info["hints_given"]
+                    needed = (hints_given + 1) * 3
+                    remaining = needed - wrong_attempts
+                    message = (
+                        f"❌ Недостаточно ошибок для подсказки!\n"
+                        f"Нужно еще {remaining} неправильных попыток (всего {needed} для следующей подсказки)"
+                    )
+            else:
+                message = f"💡 <b>Подсказка:</b> {hint_text}"
+            await query.message.reply_text(message, parse_mode='HTML')
+            
+        elif data.startswith("stats_"):
+            stats_data = await database.get_user_stats(user_id)
+            if not stats_data:
+                message = "Статистика не найдена. Используйте /start"
+            else:
+                message = (
+                    f"📊 <b>Ваша статистика:</b>\n\n"
+                    f"✅ Решено загадок: {stats_data['total_riddles_solved']}\n"
+                    f"📝 Попыток всего: {stats_data['total_riddles_attempted']}\n"
+                    f"💡 Подсказок использовано: {stats_data['total_hints_used']}\n"
+                    f"⭐ Рейтинг: {stats_data['rating']}\n"
+                )
+                if stats_data['total_riddles_attempted'] > 0:
+                    success_rate = (stats_data['total_riddles_solved'] / stats_data['total_riddles_attempted']) * 100
+                    message += f"📈 Процент успеха: {success_rate:.1f}%"
+            await query.message.reply_text(message, parse_mode='HTML')
+            
+        elif data.startswith("leaderboard_"):
+            leaders = await database.get_leaderboard(limit=10)
+            if not leaders:
+                message = "Пока нет участников в рейтинге"
+            else:
+                message = "🏆 <b>Таблица лидеров:</b>\n\n"
+                medals = ["🥇", "🥈", "🥉"]
+                for i, leader in enumerate(leaders, 1):
+                    medal = medals[i-1] if i <= 3 else f"{i}."
+                    name = leader['username'] or leader['first_name'] or f"User {leader['user_id']}"
+                    message += (
+                        f"{medal} <b>{name}</b>\n"
+                        f"   ⭐ Рейтинг: {leader['rating']} | "
+                        f"✅ Решено: {leader['total_riddles_solved']}\n\n"
+                    )
+            await query.message.reply_text(message, parse_mode='HTML')
+            
+        elif data.startswith("new_riddle_"):
+            # Отправляем новую загадку
             await send_riddle_to_user(user_id, context.bot, active_riddle=None, is_new=True)
-        except Exception as e:
-            logger.error(f"Ошибка при отправке новой загадки: {e}")
-            await query.message.reply_text("Произошла ошибка. Попробуйте /riddle")
+            
+    except Exception as e:
+        logger.error(f"Ошибка в handle_callback: {e}", exc_info=True)
+        await query.message.reply_text("Произошла ошибка. Попробуйте позже.")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
