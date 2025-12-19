@@ -444,20 +444,21 @@ async def riddle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Получить подсказку"""
-    user_id = update.effective_user.id
+    user = update.effective_user if update.message else update.callback_query.from_user
+    user_id = user.id
     hint_text = await database.get_hint(user_id)
     
     if not hint_text:
         # Получим информацию об активной загадке
         riddle_info = await database.get_user_active_riddle_info(user_id)
         if not riddle_info:
-            await update.message.reply_text("У вас нет активной загадки. Используйте /riddle чтобы получить загадку")
+            message = "У вас нет активной загадки. Используйте /riddle чтобы получить загадку"
         else:
             wrong_attempts = riddle_info["wrong_attempts"]
             hints_given = riddle_info["hints_given"]
             needed = (hints_given + 1) * 3
             remaining = needed - wrong_attempts
-            await update.message.reply_text(
+            message = (
                 f"❌ Недостаточно ошибок для подсказки!\n"
                 f"Нужно еще {remaining} неправильных попыток (всего {needed} для следующей подсказки)"
             )
