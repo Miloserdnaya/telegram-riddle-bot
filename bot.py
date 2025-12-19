@@ -1,8 +1,8 @@
 import asyncio
 import logging
 from datetime import datetime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, CallbackQueryHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -296,7 +296,20 @@ async def send_riddle_to_user(user_id: int, bot, active_riddle=None, is_new=True
         else:
             message = f"🎨 <b>Дизайнерская загадка!</b>\n\n{active_riddle['question']}\n\nОтправьте свой ответ сообщением!"
         
-        await bot.send_message(chat_id=user_id, text=message, parse_mode='HTML')
+        # Создаем клавиатуру с кнопками
+        keyboard = [
+            [
+                InlineKeyboardButton("💡 Подсказка", callback_data=f"hint_{user_id}"),
+                InlineKeyboardButton("📊 Статистика", callback_data=f"stats_{user_id}")
+            ],
+            [
+                InlineKeyboardButton("🏆 Лидерборд", callback_data=f"leaderboard_{user_id}"),
+                InlineKeyboardButton("🎲 Новая загадка", callback_data=f"new_riddle_{user_id}")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await bot.send_message(chat_id=user_id, text=message, parse_mode='HTML', reply_markup=reply_markup)
         logger.info(f"Загадка отправлена пользователю {user_id}")
     except Exception as e:
         logger.error(f"Ошибка в send_riddle_to_user для пользователя {user_id}: {e}", exc_info=True)
@@ -329,15 +342,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• Отправьте ответ обычным сообщением\n"
             "• Если ошибетесь 3 раза - получите подсказку\n"
             "• За правильные ответы получаете рейтинг!\n\n"
-            "📊 <b>Команды:</b>\n"
-            "/riddle - получить новую загадку\n"
-            "/stats - ваша статистика\n"
-            "/leaderboard - таблица лидеров\n"
-            "/hint - получить подсказку (если есть 3+ ошибки)\n\n"
+            "📊 <b>Используйте кнопки ниже для навигации!</b>\n\n"
             "Удачи! 🚀"
         )
         
-        await update.message.reply_text(welcome_message, parse_mode='HTML')
+        # Создаем постоянную клавиатуру с основными командами
+        main_keyboard = [
+            [KeyboardButton("🎲 Новая загадка"), KeyboardButton("📊 Моя статистика")],
+            [KeyboardButton("🏆 Лидерборд"), KeyboardButton("💡 Подсказка")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
+        
+        await update.message.reply_text(welcome_message, parse_mode='HTML', reply_markup=reply_markup)
         
         # Сразу отправляем загадку
         try:
@@ -355,26 +371,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Показать статистику пользователя"""
-    user_id = update.effective_user.id
+    user = update.effective_user if update.message else update.callback_query.from_user
+    user_id = user.id
     stats_data = await database.get_user_stats(user_id)
     
     if not stats_data:
-        await update.message.reply_text("Статистика не найдена. Используйте /start")
-        return
+        message = "Статистика не найдена. Используйте /start"
+    else:
+        message = (
+            f"📊 <b>Ваша статистика:</b>\n\n"
+            f"✅ Решено загадок: {stats_data['total_riddles_solved']}\n"
+            f"📝 Попыток всего: {stats_data['total_riddles_attempted']}\n"
+            f"💡 Подсказок использовано: {stats_data['total_hints_used']}\n"
+            f"⭐ Рейтинг: {stats_data['rating']}\n"
+        )
+        
+        if stats_data['total_riddles_attempted'] > 0:
+            success_rate = (stats_data['total_riddles_solved'] / stats_data['total_riddles_attempted']) * 100
+            message += f"📈 Процент успеха: {success_rate:.1f}%"
     
-    message = (
-        f"📊 <b>Ваша статистика:</b>\n\n"
-        f"✅ Решено загадок: {stats_data['total_riddles_solved']}\n"
-        f"📝 Попыток всего: {stats_data['total_riddles_attempted']}\n"
-        f"💡 Подсказок использовано: {stats_data['total_hints_used']}\n"
-        f"⭐ Рейтинг: {stats_data['rating']}\n"
-    )
-    
-    if stats_data['total_riddles_attempted'] > 0:
-        success_rate = (stats_data['total_riddles_solved'] / stats_data['total_riddles_attempted']) * 100
-        message += f"📈 Процент успеха: {success_rate:.1f}%"
-    
-    await update.message.reply_text(message, parse_mode='HTML')
+    if update.message:
+        await update.message.reply_text(message, parse_mode='HTML')
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(message, parse_mode='HTML')
 
 
 async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -382,38 +401,45 @@ async def leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     leaders = await database.get_leaderboard(limit=10)
     
     if not leaders:
-        await update.message.reply_text("Пока нет участников в рейтинге")
-        return
+        message = "Пока нет участников в рейтинге"
+    else:
+        message = "🏆 <b>Таблица лидеров:</b>\n\n"
+        
+        medals = ["🥇", "🥈", "🥉"]
+        for i, leader in enumerate(leaders, 1):
+            medal = medals[i-1] if i <= 3 else f"{i}."
+            name = leader['username'] or leader['first_name'] or f"User {leader['user_id']}"
+            message += (
+                f"{medal} <b>{name}</b>\n"
+                f"   ⭐ Рейтинг: {leader['rating']} | "
+                f"✅ Решено: {leader['total_riddles_solved']}\n\n"
+            )
     
-    message = "🏆 <b>Таблица лидеров:</b>\n\n"
-    
-    medals = ["🥇", "🥈", "🥉"]
-    for i, leader in enumerate(leaders, 1):
-        medal = medals[i-1] if i <= 3 else f"{i}."
-        name = leader['username'] or leader['first_name'] or f"User {leader['user_id']}"
-        message += (
-            f"{medal} <b>{name}</b>\n"
-            f"   ⭐ Рейтинг: {leader['rating']} | "
-            f"✅ Решено: {leader['total_riddles_solved']}\n\n"
-        )
-    
-    await update.message.reply_text(message, parse_mode='HTML')
+    if update.message:
+        await update.message.reply_text(message, parse_mode='HTML')
+    elif update.callback_query:
+        await update.callback_query.message.reply_text(message, parse_mode='HTML')
 
 
 async def riddle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Получить текущую загадку"""
-    user_id = update.effective_user.id
+    user = update.effective_user if update.message else update.callback_query.from_user
+    user_id = user.id
     await database.get_or_create_user(
         user_id=user_id,
-        username=update.effective_user.username,
-        first_name=update.effective_user.first_name
+        username=user.username,
+        first_name=user.first_name
     )
     
     try:
-        await send_riddle_to_user(user_id, context.bot)
+        await send_riddle_to_user(user_id, context.bot, active_riddle=None, is_new=True)
     except Exception as e:
         logger.error(f"Ошибка при отправке загадки: {e}")
-        await update.message.reply_text("Произошла ошибка. Попробуйте позже.")
+        error_msg = "Произошла ошибка. Попробуйте позже."
+        if update.message:
+            await update.message.reply_text(error_msg)
+        elif update.callback_query:
+            await update.callback_query.message.reply_text(error_msg)
 
 
 async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -436,16 +462,88 @@ async def hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Нужно еще {remaining} неправильных попыток (всего {needed} для следующей подсказки)"
             )
     else:
-        await update.message.reply_text(f"💡 <b>Подсказка:</b> {hint_text}", parse_mode='HTML')
+        message = f"💡 <b>Подсказка:</b> {hint_text}"
+    
+    # Отправляем сообщение (работает и для обычных сообщений, и для callback)
+    if update.message:
+        await update.message.reply_text(message, parse_mode='HTML')
+    elif update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(message, parse_mode='HTML')
+
+
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработчик callback запросов от inline кнопок"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    data = query.data
+    
+    # Регистрируем пользователя, если его нет
+    await database.get_or_create_user(
+        user_id=user_id,
+        username=query.from_user.username,
+        first_name=query.from_user.first_name
+    )
+    
+    if data.startswith("hint_"):
+        # Создаем временный update для hint
+        class FakeMessage:
+            def __init__(self, user):
+                self.from_user = user
+        fake_update = Update(update_id=update.update_id, callback_query=query)
+        fake_update.message = FakeMessage(query.from_user)
+        await hint(fake_update, context)
+        
+    elif data.startswith("stats_"):
+        # Создаем временный update для stats
+        class FakeMessage:
+            def __init__(self, user):
+                self.from_user = user
+        fake_update = Update(update_id=update.update_id, callback_query=query)
+        fake_update.message = FakeMessage(query.from_user)
+        await stats(fake_update, context)
+        
+    elif data.startswith("leaderboard_"):
+        # Создаем временный update для leaderboard
+        class FakeMessage:
+            def __init__(self, user):
+                self.from_user = user
+        fake_update = Update(update_id=update.update_id, callback_query=query)
+        fake_update.message = FakeMessage(query.from_user)
+        await leaderboard(fake_update, context)
+        
+    elif data.startswith("new_riddle_"):
+        # Отправляем новую загадку
+        try:
+            await send_riddle_to_user(user_id, context.bot, active_riddle=None, is_new=True)
+        except Exception as e:
+            logger.error(f"Ошибка при отправке новой загадки: {e}")
+            await query.message.reply_text("Произошла ошибка. Попробуйте /riddle")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений (ответы на загадки)"""
+    """Обработчик текстовых сообщений (ответы на загадки и кнопки)"""
     user = update.effective_user
     user_answer = update.message.text.strip()
     
     # Игнорируем команды
     if user_answer.startswith('/'):
+        return
+    
+    # Обработка кнопок ReplyKeyboard
+    if user_answer == "🎲 Новая загадка":
+        await riddle(update, context)
+        return
+    elif user_answer == "📊 Моя статистика":
+        await stats(update, context)
+        return
+    elif user_answer == "🏆 Лидерборд":
+        await leaderboard(update, context)
+        return
+    elif user_answer == "💡 Подсказка":
+        await hint(update, context)
         return
     
     # Регистрируем пользователя, если его нет
@@ -672,6 +770,7 @@ def main():
     application.add_handler(CommandHandler("stats", stats))
     application.add_handler(CommandHandler("leaderboard", leaderboard))
     application.add_handler(CommandHandler("hint", hint))
+    application.add_handler(CallbackQueryHandler(handle_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Запускаем бота
