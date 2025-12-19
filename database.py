@@ -290,8 +290,26 @@ async def check_answer(user_id: int, answer: str) -> Dict:
         )
         already_solved = (await cursor.fetchone())[0] > 0
         
+        # Очистка ответа пользователя перед проверкой
+        user_answer_clean = answer.strip() if answer else ""
+        correct_answer_clean = correct_answer.strip() if correct_answer else ""
+        
+        # Логирование перед проверкой
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[ПРОВЕРКА ОТВЕТА] User ID: {user_id}, Riddle ID: {riddle_db_id}")
+        logger.info(f"[ПРОВЕРКА ОТВЕТА] Ответ пользователя (raw): '{answer}' -> (clean): '{user_answer_clean}'")
+        logger.info(f"[ПРОВЕРКА ОТВЕТА] Правильный ответ (raw): '{correct_answer}' -> (clean): '{correct_answer_clean}'")
+        
         # Гибкая проверка ответа с учетом морфологии
-        is_correct = answer_checker.check_answer_flexible(answer, correct_answer)
+        try:
+            is_correct = answer_checker.check_answer_flexible(user_answer_clean, correct_answer_clean)
+            logger.info(f"[ПРОВЕРКА ОТВЕТА] Результат: {is_correct}")
+        except Exception as e:
+            logger.error(f"[ОШИБКА ПРОВЕРКИ] {e}", exc_info=True)
+            # В случае ошибки проверки, делаем простую проверку
+            is_correct = user_answer_clean.lower().strip() == correct_answer_clean.lower().strip()
+            logger.warning(f"[FALLBACK] Простая проверка: {is_correct}")
         
         # Получить номер попытки
         cursor = await db.execute(

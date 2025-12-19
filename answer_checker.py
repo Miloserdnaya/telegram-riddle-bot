@@ -13,10 +13,14 @@ except ImportError:
 
 def normalize_text(text: str) -> str:
     """Нормализация текста: удаление лишних пробелов, знаков препинания"""
+    if not text:
+        return ""
     # Удаляем лишние пробелы и приводим к нижнему регистру
     text = re.sub(r'\s+', ' ', text.strip().lower())
     # Удаляем знаки препинания в конце (но оставляем внутри для составных ответов)
     text = text.rstrip('.,!?;:')
+    # Удаляем лишние пробелы в начале и конце еще раз
+    text = text.strip()
     return text
 
 
@@ -57,13 +61,26 @@ def check_answer_flexible(user_answer: str, correct_answer: str) -> bool:
     if not user_answer or not correct_answer:
         return False
     
+    # Очистка входных данных
+    user_answer = str(user_answer).strip()
+    correct_answer = str(correct_answer).strip()
+    
+    if not user_answer or not correct_answer:
+        return False
+    
     # Нормализация
     user_norm = normalize_text(user_answer)
     correct_norm = normalize_text(correct_answer)
     
-    # 1. Точное совпадение после нормализации
+    # 1. Точное совпадение после нормализации (самый простой случай)
     if user_norm == correct_norm:
         return True
+    
+    # 1.1. Для очень коротких ответов (1-2 слова) - строгая проверка
+    if len(correct_norm.split()) <= 2 and len(user_norm.split()) <= 2:
+        # Проверяем точное совпадение нормальных форм
+        if user_norm == correct_norm:
+            return True
     
     # 2. Получаем нормальные формы всех значимых слов
     user_forms = get_normal_forms(user_answer)
@@ -79,7 +96,11 @@ def check_answer_flexible(user_answer: str, correct_answer: str) -> bool:
             
             # Для коротких ответов (1-3 слова) требуем полное совпадение всех слов
             if len(correct_forms) <= 3:
-                if match_ratio >= 1.0:  # Все слова должны совпасть
+                # Для односложных ответов (1 слово) - строгая проверка
+                if len(correct_forms) == 1:
+                    if len(matched_forms) >= 1:  # Хотя бы одна нормальная форма совпала
+                        return True
+                elif match_ratio >= 1.0:  # Все слова должны совпасть
                     return True
             else:
                 # Для длинных ответов достаточно 80%+ совпадения
