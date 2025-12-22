@@ -554,27 +554,14 @@ async def clear_user_active_riddle(user_id: int):
 
 
 async def reset_weekly_ratings():
-    """Обновить рейтинг каждую неделю (можно сбросить или пересчитать)"""
+    """Очистить турнирную таблицу - сбросить рейтинг всех пользователей до начального значения каждый понедельник"""
     async with aiosqlite.connect(DB_PATH) as db:
-        # Вариант 1: Сброс рейтинга до базового значения
-        # await db.execute("UPDATE users SET rating = 1000")
-        
-        # Вариант 2: Пересчет рейтинга на основе решенных загадок
-        # Рейтинг = базовый (1000) + (решенные загадки * 10) - (использованные подсказки * 5)
-        await db.execute("""
-            UPDATE users 
-            SET rating = 1000 + (total_riddles_solved * 10) - (total_hints_used * 5)
-            WHERE rating < 0 OR rating IS NULL
-        """)
-        
-        # Обновляем рейтинг для всех пользователей на основе их активности
-        await db.execute("""
-            UPDATE users 
-            SET rating = 1000 + (total_riddles_solved * 10) - (total_hints_used * 5)
-        """)
+        # Сбрасываем рейтинг всех пользователей до базового значения (1000)
+        # Это "очистка турнирной таблицы" - начинаем новую неделю с чистого листа
+        await db.execute("UPDATE users SET rating = 1000")
         
         await db.commit()
-        logger.info("Рейтинг обновлен для всех пользователей")
+        logger.info("Турнирная таблица очищена: рейтинг всех пользователей сброшен до 1000")
 
 
 async def get_weekly_leaderboard(limit: int = 10) -> List[Dict]:
