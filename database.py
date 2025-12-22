@@ -33,9 +33,18 @@ async def init_db():
                 total_hints_used INTEGER DEFAULT 0,
                 rating INTEGER DEFAULT 1000,
                 joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                last_course_recommendation_date DATE
+                last_course_recommendation_date DATE,
+                bot_active BOOLEAN DEFAULT 1
             )
         """)
+        
+        # Миграция: добавляем поле bot_active если его нет
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN bot_active BOOLEAN DEFAULT 1")
+            await db.commit()
+        except Exception:
+            # Поле уже существует, игнорируем ошибку
+            pass
         
         # Миграция: добавляем поле last_course_recommendation_date если его нет
         try:

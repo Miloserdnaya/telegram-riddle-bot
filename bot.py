@@ -143,12 +143,12 @@ async def weekly_grant_raffle(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def send_riddles_to_users(context: ContextTypes.DEFAULT_TYPE):
-    """Отправлять напоминания о загадках неактивным пользователям каждые 3 часа"""
+    """Отправлять напоминания о загадках активным пользователям каждые 3 часа (только если бот включен)"""
     try:
-        # Получаем только пользователей с активными загадками (неактивные)
+        # Получаем только пользователей с активными загадками И с включенным ботом (bot_active = 1)
         users = await database.get_users_with_active_riddles()
         if not users:
-            logger.info("Нет пользователей с активными загадками для напоминания")
+            logger.info("Нет активных пользователей с активными загадками для напоминания")
             return
         
         bot = context.bot
@@ -156,6 +156,10 @@ async def send_riddles_to_users(context: ContextTypes.DEFAULT_TYPE):
         
         for user_id in users:
             try:
+                # Дополнительная проверка, что бот активен (на всякий случай)
+                if not await database.is_bot_active(user_id):
+                    continue
+                
                 # Получаем активную загадку пользователя
                 riddle_id = await database.get_user_active_riddle_id(user_id)
                 if not riddle_id:
@@ -181,7 +185,7 @@ async def send_riddles_to_users(context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"Ошибка при отправке напоминания пользователю {user_id}: {e}")
         
-        logger.info(f"Отправлено {sent_count} напоминаний пользователям")
+        logger.info(f"Отправлено {sent_count} напоминаний активным пользователям")
     except Exception as e:
         logger.error(f"Ошибка при отправке напоминаний: {e}")
 
@@ -346,14 +350,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Удачи! 🚀"
         )
         
+        # Проверяем статус бота для пользователя
+        bot_is_active = await database.is_bot_active(user.id)
+        
         # Создаем постоянную клавиатуру с основными командами
-        main_keyboard = [
-            [KeyboardButton("🎲 Новая загадка"), KeyboardButton("📊 Моя статистика")],
-            [KeyboardButton("🏆 Лидерборд"), KeyboardButton("💡 Подсказка")]
-        ]
+        if bot_is_active:
+            main_keyboard = [
+                [KeyboardButton("🎲 Новая загадка"), KeyboardButton("📊 Моя статистика")],
+                [KeyboardButton("🏆 Лидерборд"), KeyboardButton("💡 Подсказка")],
+                [KeyboardButton("⏸ Остановить бота")]
+            ]
+        else:
+            main_keyboard = [
+                [KeyboardButton("▶️ Начать разгадывать загадки")]
+            ]
         reply_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
         
         await update.message.reply_text(welcome_message, parse_mode='HTML', reply_markup=reply_markup)
+        
+        # Если бот активен, отправляем загадку
+        if bot_is_active:
+            try:
+                await send_riddle_to_user(user.id, context.bot)
+            except Exception as e:
+                logger.error(f"Ошибка при отправке загадки пользователю {user.id}: {e}", exc_info=True)
         
         # Сразу отправляем загадку
         try:
