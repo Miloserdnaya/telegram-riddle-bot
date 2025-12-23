@@ -578,23 +578,89 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Обработчик текстовых сообщений (ответы на загадки и кнопки)"""
     user = update.effective_user
     user_answer = update.message.text.strip()
+    user_answer_lower = user_answer.lower()
     
     # Игнорируем команды
     if user_answer.startswith('/'):
         return
     
-    # Обработка кнопок ReplyKeyboard
-    if user_answer == "🎲 Новая загадка":
+    # Обработка кнопок ReplyKeyboard (проверяем по ключевым словам, не точному совпадению)
+    # Это защищает от проблем с разными эмодзи
+    if "новая загадка" in user_answer_lower:
         await riddle(update, context)
         return
-    elif user_answer == "📊 Моя статистика":
+    elif "моя статистика" in user_answer_lower or "статистика" in user_answer_lower:
         await stats(update, context)
         return
-    elif user_answer == "🏆 Лидерборд":
+    elif "лидерборд" in user_answer_lower:
         await leaderboard(update, context)
         return
-    elif user_answer == "💡 Подсказка":
+    elif "подсказка" in user_answer_lower:
         await hint(update, context)
+        return
+    elif "остановить бота" in user_answer_lower or "остановить" in user_answer_lower:
+        await database.set_bot_active(user.id, False)
+        # Обновляем клавиатуру
+        main_keyboard = [
+            [KeyboardButton("▶️ Начать разгадывать загадки")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
+        await update.message.reply_text(
+            "⏸ <b>Бот остановлен</b>\n\n"
+            "Вы больше не будете получать напоминания о загадках.\n"
+            "Когда захотите вернуться, нажмите кнопку \"Начать разгадывать загадки\" - "
+            "вы вернетесь к текущей загадке.",
+            parse_mode='HTML',
+            reply_markup=reply_markup
+        )
+        return
+    elif "начать разгадывать" in user_answer_lower:
+        await database.set_bot_active(user.id, True)
+        # Обновляем клавиатуру
+        main_keyboard = [
+            [KeyboardButton("🎲 Новая загадка"), KeyboardButton("📊 Моя статистика")],
+            [KeyboardButton("🏆 Лидерборд"), KeyboardButton("💡 Подсказка")],
+            [KeyboardButton("⏸ Остановить бота")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(main_keyboard, resize_keyboard=True)
+        
+        # Проверяем, есть ли у пользователя активная загадка
+        riddle_id = await database.get_user_active_riddle_id(user.id)
+        if riddle_id:
+            # Отправляем текущую загадку (на которой остановился)
+            riddle_data = await database.get_riddle_by_id(riddle_id)
+            if riddle_data:
+                active_riddle = {
+                    "id": riddle_id,
+                    "question": riddle_data["question"],
+                    "answer": riddle_data["answer"],
+                    "hint": riddle_data.get("hint")
+                }
+                await update.message.reply_text(
+                    "✅ <b>Добро пожаловать обратно!</b>\n\n"
+                    "Вы вернулись к текущей загадке.",
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+                await send_riddle_to_user(user.id, context.bot, active_riddle=active_riddle, is_new=False)
+            else:
+                # Если загадка не найдена, отправляем новую
+                await update.message.reply_text(
+                    "✅ <b>Добро пожаловать обратно!</b>\n\n"
+                    "Отправляю новую загадку.",
+                    parse_mode='HTML',
+                    reply_markup=reply_markup
+                )
+                await send_riddle_to_user(user.id, context.bot, active_riddle=None, is_new=True)
+        else:
+            # Если нет активной загадки, отправляем новую
+            await update.message.reply_text(
+                "✅ <b>Добро пожаловать обратно!</b>\n\n"
+                "Отправляю новую загадку.",
+                parse_mode='HTML',
+                reply_markup=reply_markup
+            )
+            await send_riddle_to_user(user.id, context.bot, active_riddle=None, is_new=True)
         return
     
     # Регистрируем пользователя, если его нет
