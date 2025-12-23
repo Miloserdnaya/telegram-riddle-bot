@@ -891,7 +891,6 @@ async def post_init(app: Application):
     )
     
     scheduler.start()
-    scheduler.start()
     logger.info("=" * 60)
     logger.info("✅ ПЛАНИРОВЩИК ЗАПУЩЕН")
     logger.info("=" * 60)
