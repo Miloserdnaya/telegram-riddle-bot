@@ -45,3 +45,4 @@ git push -u origin main
 - `GITHUB_SETUP.md` - детальная инструкция по GitHub
 - `DEPLOY_RAILWAY.md` - детальная инструкция по Railway
 
+

@@ -580,25 +580,42 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_answer = update.message.text.strip()
     user_answer_lower = user_answer.lower()
     
+    logger.info(f"[СООБЩЕНИЕ] Пользователь {user.id} отправил: '{user_answer}'")
+    
     # Игнорируем команды
     if user_answer.startswith('/'):
         return
     
-    # Обработка кнопок ReplyKeyboard (проверяем по ключевым словам, не точному совпадению)
-    # Это защищает от проблем с разными эмодзи
-    if "новая загадка" in user_answer_lower:
+    # ВАЖНО: Сначала проверяем ВСЕ кнопки ReplyKeyboard
+    # Это защищает от списания баллов когда пользователь нажимает кнопку
+    
+    # Проверка на кнопку "Новая загадка"
+    if "новая загадка" in user_answer_lower or "🎲" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Новая загадка'")
         await riddle(update, context)
         return
-    elif "моя статистика" in user_answer_lower or "статистика" in user_answer_lower:
+    
+    # Проверка на кнопку "Статистика"  
+    if "статистика" in user_answer_lower or "📊" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Статистика'")
         await stats(update, context)
         return
-    elif "лидерборд" in user_answer_lower:
+    
+    # Проверка на кнопку "Лидерборд"
+    if "лидерборд" in user_answer_lower or "🏆" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Лидерборд'")
         await leaderboard(update, context)
         return
-    elif "подсказка" in user_answer_lower:
+    
+    # Проверка на кнопку "Подсказка"
+    if "подсказка" in user_answer_lower or "💡" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Подсказка'")
         await hint(update, context)
         return
-    elif "остановить бота" in user_answer_lower or "остановить" in user_answer_lower:
+    
+    # Проверка на кнопку "Остановить бота"
+    if "остановить" in user_answer_lower or "⏸" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Остановить бота'")
         await database.set_bot_active(user.id, False)
         # Обновляем клавиатуру
         main_keyboard = [
@@ -614,7 +631,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=reply_markup
         )
         return
-    elif "начать разгадывать" in user_answer_lower:
+    
+    # Проверка на кнопку "Начать разгадывать загадки"
+    if "начать разгадывать" in user_answer_lower or "▶️" in user_answer:
+        logger.info(f"[КНОПКА] Пользователь {user.id} нажал 'Начать разгадывать загадки'")
         await database.set_bot_active(user.id, True)
         # Обновляем клавиатуру
         main_keyboard = [
@@ -662,6 +682,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await send_riddle_to_user(user.id, context.bot, active_riddle=None, is_new=True)
         return
+    
+    # Если дошли до этой точки - значит это ОТВЕТ на загадку, не кнопка
+    logger.info(f"[ОТВЕТ] Пользователь {user.id} отправил ответ: '{user_answer}'")
     
     # Регистрируем пользователя, если его нет
     await database.get_or_create_user(
